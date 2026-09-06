@@ -1,0 +1,38 @@
+name: sleep-apnea-ecg
+
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+
+  # Scientific computing
+  - numpy
+  - pandas
+  - scipy
+
+  # Machine learning
+  - scikit-learn
+  - joblib
+
+  # Visualization
+  - matplotlib
+  - seaborn
+
+  # Notebook environment
+  - jupyter
+  - ipykernel
+
+  # Testing
+  - pytest
+
+  # Deep learning
+  - pytorch
+
+  - pip:
+      - wfdb
+      - shap
+      - streamlit

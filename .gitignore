@@ -1,0 +1,158 @@
+# ============================================================
+# Python
+# ============================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ============================================================
+# Jupyter
+# ============================================================
+
+.ipynb_checkpoints/
+
+# ============================================================
+# Environment / Secrets
+# ============================================================
+
+.env
+.env.*
+*.env
+
+# ============================================================
+# Dataset
+# ============================================================
+
+# Raw PhysioNet Apnea-ECG dataset
+data/raw/*
+!data/raw/.gitkeep
+
+# Intermediate and processed datasets
+data/interim/*
+!data/interim/.gitkeep
+
+data/processed/*
+!data/processed/.gitkeep
+
+# ============================================================
+# Trained Models
+# ============================================================
+
+models/trained/*
+!models/trained/.gitkeep
+
+models/checkpoints/*
+!models/checkpoints/.gitkeep
+
+# Model files
+*.pkl
+*.joblib
+*.pt
+*.pth
+*.onnx
+*.h5
+*.keras
+
+# ============================================================
+# Generated Results
+# ============================================================
+
+results/experiments/*
+!results/experiments/.gitkeep
+
+results/figures/*
+!results/figures/.gitkeep
+
+results/metrics/*
+!results/metrics/.gitkeep
+
+results/predictions/*
+!results/predictions/.gitkeep
+
+# ============================================================
+# Reports / Generated Files
+# ============================================================
+
+reports/figures/*
+*.pdf
+*.docx
+
+# Keep report structure directories
+!reports/figures/.gitkeep
+
+# ============================================================
+# Logs
+# ============================================================
+
+*.log
+logs/
+
+# ============================================================
+# IDE / Editor
+# ============================================================
+
+.vscode/
+.idea/
+
+# VS Code local settings
+*.code-workspace
+
+# ============================================================
+# OS Files
+# ============================================================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# Temporary Files
+# ============================================================
+
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# ============================================================
+# Coverage / Testing
+# ============================================================
+
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ============================================================
+# Experiment / ML Artifacts
+# ============================================================
+
+wandb/
+mlruns/
+
+# TensorBoard
+runs/
+
+# ============================================================
+# Streamlit
+# ============================================================
+
+.streamlit/secrets.toml
