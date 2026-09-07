@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run test suite
+        run: pytest tests/ -v
+
+      - name: Preprocessing self-test (no network required)
+        run: python preprocess_apnea_ecg.py --self-test --out-dir ./ci_selftest_out
+
+      - name: Training self-test (no network required)
+        run: |
+          python train_model.py \
+            --train-csv ./ci_selftest_out/train_features_selftest.csv \
+            --test-csv ./ci_selftest_out/test_features_selftest.csv \
+            --out-dir ./ci_model_out --cv-folds 4
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Lint
+        run: ruff check . --line-length 100 || true  # non-blocking for now
