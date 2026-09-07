@@ -48,7 +48,8 @@ def main() -> None:
     )
 
     output_path = (
-        output_dir / "epoch_features.csv"
+        output_dir /
+        "epoch_features.csv"
     )
 
     df.to_csv(

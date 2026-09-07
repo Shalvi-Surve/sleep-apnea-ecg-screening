@@ -1,3 +1,11 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
 from src.data.load_ecg import load_record
 from src.features.edr import compute_edr_proxy
 from src.features.hrv_features import compute_hrv_features
@@ -10,24 +18,128 @@ from src.features.windowing import (
 )
 from src.preprocessing.signal_cleaning import clean_ecg
 
+
 log = logging.getLogger(__name__)
+
+# R-peak quality-control settings
+MIN_BEATS = 20
+PADDING_SEC = 3
+
+
+def _get_epoch_r_peaks(
+    ecg_clean: np.ndarray,
+    start: int,
+    end: int,
+    fs: int,
+    qrs_samples: np.ndarray | None = None,
+) -> tuple[np.ndarray, str]:
+    """
+    Detect R-peaks for one epoch using a padded local ECG segment.
+
+    Primary method:
+        NeuroKit2-based detector through detect_r_peaks().
+
+    Fallback:
+        PhysioNet database-provided QRS annotations are used only
+        when the independent detector produces fewer than MIN_BEATS.
+
+    Returns:
+        peaks_in_epoch, source
+
+    source is one of:
+        "neurokit"
+        "qrs_fallback"
+        "unusable"
+    """
+
+    pad = int(PADDING_SEC * fs)
+
+    left = max(0, start - pad)
+    right = min(len(ecg_clean), end + pad)
+
+    segment = ecg_clean[left:right]
+
+    try:
+        detected = detect_r_peaks(
+            segment,
+            fs,
+            None,
+        )
+    except Exception as exc:
+        log.warning(
+            "R-peak detection failed for epoch %d-%d: %s",
+            start,
+            end,
+            exc,
+        )
+        detected = np.array([], dtype=int)
+
+    detected = np.asarray(
+        detected,
+        dtype=int,
+    )
+
+    if detected.size:
+        global_peaks = detected + left
+
+        epoch_peaks = global_peaks[
+            (global_peaks >= start)
+            & (global_peaks < end)
+        ]
+
+        epoch_peaks = np.unique(
+            epoch_peaks
+        )
+    else:
+        epoch_peaks = np.array(
+            [],
+            dtype=int,
+        )
+
+    if len(epoch_peaks) >= MIN_BEATS:
+        return epoch_peaks, "neurokit"
+
+    # ---------------------------------------------------------
+    # QRS fallback
+    # ---------------------------------------------------------
+
+    if qrs_samples is not None:
+        qrs_samples = np.asarray(
+            qrs_samples,
+            dtype=int,
+        )
+
+        qrs_epoch = qrs_samples[
+            (qrs_samples >= start)
+            & (qrs_samples < end)
+        ]
+
+        qrs_epoch = np.unique(
+            qrs_epoch
+        )
+
+        if len(qrs_epoch) >= MIN_BEATS:
+            return qrs_epoch, "qrs_fallback"
+
+    return (
+        np.array([], dtype=int),
+        "unusable",
+    )
 
 
 def build_epoch_features(record) -> pd.DataFrame:
     """
     Convert one ECG recording into one feature row per
     one-minute epoch.
+
+    R-peaks are detected independently for each padded epoch.
+    Epochs with insufficient primary detections may use the
+    database-provided QRS annotations as a fallback.
     """
 
     ecg_clean = clean_ecg(
         record.ecg,
         record.fs,
-    )
-
-    r_peaks = detect_r_peaks(
-        ecg_clean,
-        record.fs,
-        record.qrs_samples,
     )
 
     boundaries = get_epoch_boundaries(
@@ -37,15 +149,28 @@ def build_epoch_features(record) -> pd.DataFrame:
 
     rows = []
 
+    source_counts = {
+        "neurokit": 0,
+        "qrs_fallback": 0,
+        "unusable": 0,
+    }
+
     for epoch_idx, (start, end) in enumerate(
         boundaries
     ):
-        epoch_peaks = r_peaks[
-            (r_peaks >= start)
-            & (r_peaks < end)
-        ]
+        epoch_peaks, peak_source = _get_epoch_r_peaks(
+            ecg_clean=ecg_clean,
+            start=start,
+            end=end,
+            fs=record.fs,
+            qrs_samples=record.qrs_samples,
+        )
 
-        local_peaks = epoch_peaks - start
+        source_counts[peak_source] += 1
+
+        local_peaks = (
+            epoch_peaks - start
+        )
 
         rr, rr_times = rr_intervals_from_peaks(
             local_peaks,
@@ -55,7 +180,10 @@ def build_epoch_features(record) -> pd.DataFrame:
         features = {
             "record": record.name,
             "epoch_idx": epoch_idx,
-            "n_beats": int(len(local_peaks)),
+            "n_beats": int(
+                len(local_peaks)
+            ),
+            "peak_source": peak_source,
         }
 
         features.update(
@@ -73,6 +201,15 @@ def build_epoch_features(record) -> pd.DataFrame:
         )
 
         rows.append(features)
+
+    log.info(
+        "%s R-peak sources: NeuroKit=%d | "
+        "QRS fallback=%d | unusable=%d",
+        record.name,
+        source_counts["neurokit"],
+        source_counts["qrs_fallback"],
+        source_counts["unusable"],
+    )
 
     return pd.DataFrame(rows)
 
@@ -137,10 +274,10 @@ def assemble_dataset(
 
 def drop_missing_beats(
     df: pd.DataFrame,
-    min_beats: int = 20,
+    min_beats: int = MIN_BEATS,
 ) -> pd.DataFrame:
     """
-    Remove epochs with insufficient detected beats.
+    Remove epochs with insufficient detected/fallback beats.
     """
 
     before = len(df)
