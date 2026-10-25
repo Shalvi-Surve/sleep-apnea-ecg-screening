@@ -609,6 +609,7 @@ def load_predictions() -> Dict[str, pd.DataFrame]:
         "Random Forest": PREDICTIONS_DIR / "random_forest_predictions.csv",
         "1D CNN": PREDICTIONS_DIR / "cnn_predictions.csv",
         "Transformer V1": PREDICTIONS_DIR / "transformer_predictions.csv",
+        "Proposed Transformer V2": PREDICTIONS_DIR / "proposed_transformer_v2_predictions.csv",
     }
 
     output = {}
@@ -3013,8 +3014,11 @@ predictions = load_predictions()
 
 comparison = performance_from_available_data()
 
+# Learning-record screening uses the V2 artifact, which contains
+# the 34 expected A/B/C learning records. Transformer V1 remains
+# available separately for its stored test-set results.
 transformer_predictions = predictions.get(
-    "Transformer V1",
+    "Proposed Transformer V2",
     pd.DataFrame(),
 )
 
@@ -4931,8 +4935,8 @@ elif page == "Screening Results":
             ]
 
             st.success(
-                "Using stored Transformer V1 predictions from the evaluated "
-                "learning dataset."
+                "Using stored Proposed Transformer V2 predictions from the "
+                "learning dataset. Research prototype only; not a clinical diagnosis."
             )
 
             cols = st.columns(4)
@@ -5814,53 +5818,71 @@ elif page == "Results Dashboard":
                 "Select at least one metric above."
             )
 
+        elif comparison.empty or "Model" not in comparison.columns:
+            st.warning(
+                "Model comparison data is unavailable or malformed. "
+                "This section will appear when valid evaluation artifacts "
+                "are available."
+            )
+
         else:
-
-            metric = st.selectbox(
-                "Performance metric",
-                selected_metrics,
-                key="dashboard_metric",
-            )
-
-            fig = plot_metric_bars(
-                comparison,
-                metric,
-                selected_models,
-                title=f"{metric} — Selected Models",
-            )
-
-            if fig is not None:
-                st.plotly_chart(
-                    fig,
-                    width="stretch",
-                )
-
-            display = comparison[
-                comparison["Model"].isin(
-                    selected_models
-                )
-            ].copy()
-
-            display = display[
-                ["Model"] + selected_metrics
+            available_models = [
+                model for model in selected_models
+                if model in comparison["Model"].astype(str).tolist()
+            ]
+            available_metrics = [
+                metric for metric in selected_metrics
+                if metric in comparison.columns
             ]
 
-            for col in selected_metrics:
-                display[col] = display[
-                    col
-                ].map(
-                    lambda x: (
-                        f"{x * 100:.2f}%"
-                        if not pd.isna(x)
-                        else "—"
-                    )
+            if not available_models:
+                st.warning(
+                    "No selected models are available in the comparison data."
+                )
+            elif not available_metrics:
+                st.warning(
+                    "None of the selected metrics are available in the comparison data."
+                )
+            else:
+                metric = st.selectbox(
+                    "Performance metric",
+                    available_metrics,
+                    key="dashboard_metric",
                 )
 
-            display_dataframe(
-                display,
-                width="stretch",
-                hide_index=True,
-            )
+                fig = plot_metric_bars(
+                    comparison,
+                    metric,
+                    available_models,
+                    title=f"{metric} - Selected Models",
+                )
+
+                if fig is not None:
+                    st.plotly_chart(
+                        fig,
+                        width="stretch",
+                    )
+
+                display = comparison[
+                    comparison["Model"].astype(str).isin(
+                        available_models
+                    )
+                ][["Model"] + available_metrics].copy()
+
+                for col in available_metrics:
+                    display[col] = display[col].map(
+                        lambda value: (
+                            f"{value * 100:.2f}%"
+                            if pd.notna(value)
+                            else "?"
+                        )
+                    )
+
+                display_dataframe(
+                    display,
+                    width="stretch",
+                    hide_index=True,
+                )
 
     # --------------------------------------------------------
     # SCREENING SAFETY
