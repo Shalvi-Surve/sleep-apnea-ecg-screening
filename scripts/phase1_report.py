@@ -527,6 +527,11 @@ def create_ml_ready_dataset(
         df
     )
 
+    if "signal_quality" in df.columns:
+        df = df[
+            df["signal_quality"].eq("usable")
+        ].copy()
+
     # --------------------------------------------------------
     # Remove rows without valid labels
     # --------------------------------------------------------
@@ -553,6 +558,8 @@ def create_ml_ready_dataset(
         "record",
         "epoch_idx",
         "peak_source",
+        "signal_quality",
+        "quality_reason",
         "label",
     }
 

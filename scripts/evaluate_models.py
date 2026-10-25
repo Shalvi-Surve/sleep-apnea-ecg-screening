@@ -4,196 +4,129 @@ import json
 from pathlib import Path
 
 import pandas as pd
-import torch
-
-from src.models.cnn_1d import (
-    LightweightCNN1D,
-)
-from src.models.lightweight_transformer import (
-    LightweightTransformer,
-)
 
 
-METRICS = [
-    "accuracy",
-    "balanced_accuracy",
-    "precision",
-    "sensitivity",
-    "specificity",
-    "f1",
-    "roc_auc",
-    "pr_auc",
-]
+ROOT = Path(__file__).resolve().parents[1]
+
+METRICS_DIR = ROOT / "results" / "metrics"
+COMPARISON_DIR = ROOT / "results" / "model_comparison"
 
 
-def load_summary(model):
+def load_json(path: Path):
+    if not path.exists():
+        return None
 
-    path = Path(
-        "results/metrics"
-    ) / f"{model}_summary.json"
-
-    with open(
-        path,
-        "r",
-        encoding="utf-8",
-    ) as f:
-
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
-
-
-def count_parameters(model):
-
-    return sum(
-        p.numel()
-        for p in model.parameters()
-    )
-
-
-def model_size_kb(model):
-
-    parameters = count_parameters(
-        model
-    )
-
-    return (
-        parameters * 4
-    ) / 1024
 
 
 def main():
 
-    rows = []
+    print("=" * 70)
+    print("FINAL MODEL EVALUATION")
+    print("=" * 70)
 
-    rf = load_summary(
-        "random_forest"
+    comparison_file = (
+        COMPARISON_DIR /
+        "complete_model_comparison.csv"
     )
 
-    cnn = load_summary(
-        "cnn"
+    if not comparison_file.exists():
+
+        print("\nERROR:")
+        print(
+            "complete_model_comparison.csv "
+            "was not found."
+        )
+
+        print(
+            "\nRun first:"
+        )
+
+        print(
+            "python scripts/build_model_comparison.py"
+        )
+
+        return
+
+    comparison = pd.read_csv(
+        comparison_file
     )
 
-    transformer = load_summary(
-        "transformer"
+    print("\nFINAL MODEL PERFORMANCE")
+    print("-" * 70)
+
+    print(
+        comparison.to_string(
+            index=False,
+            float_format=lambda x: f"{x:.4f}"
+        )
     )
 
-    for model_name, summary in [
-        ("Random Forest", rf),
-        ("1D CNN", cnn),
-        ("Lightweight Transformer", transformer),
-    ]:
-
-        row = {
-            "model": model_name
-        }
-
-        for metric in METRICS:
-
-            row[
-                f"{metric}_mean"
-            ] = summary[
-                metric
-            ]["mean"]
-
-            row[
-                f"{metric}_std"
-            ] = summary[
-                metric
-            ]["std"]
-
-        rows.append(row)
-
-    comparison = pd.DataFrame(
-        rows
-    )
-
-    cnn_model = LightweightCNN1D()
-
-    transformer_model = (
-        LightweightTransformer()
-    )
-
-    complexity = pd.DataFrame(
-        [
-            {
-                "model":
-                    "1D CNN",
-                "parameters":
-                    count_parameters(
-                        cnn_model
-                    ),
-                "model_size_kb":
-                    model_size_kb(
-                        cnn_model
-                    ),
-            },
-            {
-                "model":
-                    "Lightweight Transformer",
-                "parameters":
-                    count_parameters(
-                        transformer_model
-                    ),
-                "model_size_kb":
-                    model_size_kb(
-                        transformer_model
-                    ),
-            },
-        ]
-    )
-
-    Path(
-        "results/model_comparison"
-    ).mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    Path(
-        "results/complexity"
-    ).mkdir(
-        parents=True,
-        exist_ok=True,
+    final_file = (
+        COMPARISON_DIR /
+        "final_evaluation_summary.csv"
     )
 
     comparison.to_csv(
-        "results/model_comparison/"
-        "model_comparison.csv",
-        index=False,
+        final_file,
+        index=False
     )
 
-    complexity.to_csv(
-        "results/complexity/"
-        "deep_model_complexity.csv",
-        index=False,
-    )
+    print("\nSaved:")
+    print(final_file)
 
-    print("\nMODEL COMPARISON")
-    print("=" * 80)
+    print("\n" + "=" * 70)
+    print("AVAILABLE MODEL ARTIFACTS")
+    print("=" * 70)
 
-    print(
-        comparison[
-            [
-                "model",
-                "accuracy_mean",
-                "sensitivity_mean",
-                "specificity_mean",
-                "f1_mean",
-                "roc_auc_mean",
-                "pr_auc_mean",
-            ]
-        ].to_string(
-            index=False
-        )
-    )
+    artifacts = [
+        (
+            "Random Forest",
+            METRICS_DIR /
+            "random_forest_summary.json"
+        ),
+        (
+            "1D CNN",
+            METRICS_DIR /
+            "cnn_metrics.json"
+        ),
+        (
+            "Transformer V1",
+            METRICS_DIR /
+            "transformer_metrics.json"
+        ),
+        (
+            "Random Forest predictions",
+            ROOT /
+            "results/predictions/"
+            "random_forest_predictions.csv"
+        ),
+        (
+            "CNN predictions",
+            ROOT /
+            "results/predictions/"
+            "cnn_predictions.csv"
+        ),
+        (
+            "Transformer predictions",
+            ROOT /
+            "results/predictions/"
+            "transformer_predictions.csv"
+        ),
+    ]
 
-    print("\nMODEL COMPLEXITY")
-    print("=" * 60)
+    for name, path in artifacts:
 
-    print(
-        complexity.to_string(
-            index=False
-        )
-    )
+        if path.exists():
+            print(f"✓ {name}")
+
+        else:
+            print(f"✗ MISSING — {name}")
+
+    print("\n" + "=" * 70)
+    print("EVALUATION COMPLETE")
+    print("=" * 70)
 
 
 if __name__ == "__main__":

@@ -26,6 +26,43 @@ MIN_BEATS = 20
 PADDING_SEC = 3
 
 
+# Signal-quality thresholds: initial screening heuristics.
+FLATLINE_EPS = 1e-12
+MIN_UNIQUE_SAMPLES = 2
+MIN_NONZERO_FRACTION = 0.10
+
+
+def _assess_epoch_signal(
+    ecg: np.ndarray,
+) -> tuple[bool, str]:
+    """
+    Conservative screening for clearly unusable ECG epochs.
+
+    Returns (is_usable, reason).
+    Thresholds are initial heuristics and must be
+    validated across the dataset.
+    """
+    x = np.asarray(ecg, dtype=float)
+
+    if x.size == 0:
+        return False, "empty_signal"
+
+    if not np.isfinite(x).all():
+        return False, "non_finite_signal"
+
+    if np.unique(x).size < MIN_UNIQUE_SAMPLES:
+        return False, "flatline"
+
+    nonzero_fraction = np.mean(
+        np.abs(x) > FLATLINE_EPS
+    )
+
+    if nonzero_fraction < MIN_NONZERO_FRACTION:
+        return False, "mostly_flatline"
+
+    return True, "ok"
+
+
 def _get_epoch_r_peaks(
     ecg_clean: np.ndarray,
     start: int,
@@ -155,22 +192,29 @@ def build_epoch_features(record) -> pd.DataFrame:
         "unusable": 0,
     }
 
-    for epoch_idx, (start, end) in enumerate(
-        boundaries
-    ):
-        epoch_peaks, peak_source = _get_epoch_r_peaks(
-            ecg_clean=ecg_clean,
-            start=start,
-            end=end,
-            fs=record.fs,
-            qrs_samples=record.qrs_samples,
+    for epoch_idx, (start, end) in enumerate(boundaries):
+        epoch_signal = ecg_clean[start:end]
+
+        signal_usable, quality_reason = _assess_epoch_signal(
+            record.ecg[start:end]
         )
+
+        if signal_usable:
+            epoch_peaks, peak_source = _get_epoch_r_peaks(
+                ecg_clean=ecg_clean,
+                start=start,
+                end=end,
+                fs=record.fs,
+                qrs_samples=record.qrs_samples,
+            )
+
+        else:
+            epoch_peaks = np.array([], dtype=int)
+            peak_source = "unusable"
 
         source_counts[peak_source] += 1
 
-        local_peaks = (
-            epoch_peaks - start
-        )
+        local_peaks = epoch_peaks - start
 
         rr, rr_times = rr_intervals_from_peaks(
             local_peaks,
@@ -180,20 +224,24 @@ def build_epoch_features(record) -> pd.DataFrame:
         features = {
             "record": record.name,
             "epoch_idx": epoch_idx,
-            "n_beats": int(
-                len(local_peaks)
-            ),
+            "n_beats": int(len(local_peaks)),
             "peak_source": peak_source,
+            "signal_quality": (
+                "usable" if signal_usable else "unusable"
+            ),
+            "quality_reason": quality_reason,
         }
 
-        features.update(
-            compute_hrv_features(rr)
-        )
+        features.update(compute_hrv_features(rr))
 
-        features["edr_amp_std"] = compute_edr_proxy(
-            ecg_clean[start:end],
-            record.fs,
-        )
+        if signal_usable:
+            features["edr_amp_std"] = compute_edr_proxy(
+                epoch_signal,
+                record.fs,
+            )
+
+        else:
+            features["edr_amp_std"] = np.nan
 
         features["label"] = assign_apnea_label(
             record.apn_labels,
@@ -202,14 +250,15 @@ def build_epoch_features(record) -> pd.DataFrame:
 
         rows.append(features)
 
-    log.info(
+
+        log.info(
         "%s R-peak sources: NeuroKit=%d | "
         "QRS fallback=%d | unusable=%d",
         record.name,
         source_counts["neurokit"],
         source_counts["qrs_fallback"],
         source_counts["unusable"],
-    )
+        )
 
     return pd.DataFrame(rows)
 
@@ -277,26 +326,29 @@ def drop_missing_beats(
     min_beats: int = MIN_BEATS,
 ) -> pd.DataFrame:
     """
-    Remove epochs with insufficient detected/fallback beats.
-    """
+    Retain epochs with sufficient beats and usable ECG quality.
 
+    Quality columns are optional for compatibility with
+    older datasets. New datasets should contain them.
+    """
     before = len(df)
 
-    result = df[
-        df["n_beats"] >= min_beats
-    ].reset_index(drop=True)
+    mask = df["n_beats"].ge(min_beats)
+
+    if "signal_quality" in df.columns:
+        mask &= df["signal_quality"].eq("usable")
+
+    result = df.loc[mask].copy()
+    result = result.reset_index(drop=True)
 
     log.info(
-        "Dropped %d epochs with fewer than %d beats "
-        "(%d -> %d)",
-        before - len(result),
-        min_beats,
+        "Epoch filtering: %d -> %d rows; removed %d",
         before,
         len(result),
+        before - len(result),
     )
 
     return result
-
 
 def _log_record_summary(
     name: str,

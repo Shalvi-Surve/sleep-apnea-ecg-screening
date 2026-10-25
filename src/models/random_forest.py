@@ -20,22 +20,48 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 
-FEATURE_COLUMNS = [
-    "n_beats",
-    "mean_rr",
-    "sdnn",
-    "rmssd",
-    "pnn50",
-    "cvrr",
-    "mean_hr",
-    "min_rr",
-    "max_rr",
-    "rr_range",
-    "edr_amp_std",
-]
+N_SPLITS = 5
+SEED = 42
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+X_PATH = (
+    BASE_DIR
+    / "results"
+    / "experiments"
+    / "temporal_X.npy"
+)
+
+Y_PATH = (
+    BASE_DIR
+    / "results"
+    / "experiments"
+    / "temporal_y.npy"
+)
+
+GROUPS_PATH = (
+    BASE_DIR
+    / "results"
+    / "experiments"
+    / "temporal_groups.npy"
+)
+
+RESULTS_DIR = BASE_DIR / "results"
+PRED_DIR = RESULTS_DIR / "predictions"
+METRICS_DIR = RESULTS_DIR / "metrics"
+MODEL_DIR = BASE_DIR / "models" / "trained"
+
+for directory in [
+    PRED_DIR,
+    METRICS_DIR,
+    MODEL_DIR,
+]:
+    directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
 
 def calculate_metrics(
@@ -58,13 +84,13 @@ def calculate_metrics(
 
     return {
         "accuracy": accuracy_score(
-            y_true, y_pred
+            y_true,
+            y_pred,
         ),
-        "balanced_accuracy":
-            balanced_accuracy_score(
-                y_true,
-                y_pred,
-            ),
+        "balanced_accuracy": balanced_accuracy_score(
+            y_true,
+            y_pred,
+        ),
         "precision": precision_score(
             y_true,
             y_pred,
@@ -97,18 +123,44 @@ def calculate_metrics(
 
 
 def run_random_forest(
-    data_path="data/processed/ml_ready_dataset.csv",
-    n_splits=5,
+    n_splits: int = N_SPLITS,
 ):
 
-    df = pd.read_csv(data_path)
+    print("=" * 70)
+    print("RANDOM FOREST — SUBJECT-WISE 5-FOLD EVALUATION")
+    print("=" * 70)
 
-    X = df[
-        FEATURE_COLUMNS
-    ].to_numpy(dtype=np.float32)
+    print("\nLoading temporal dataset...")
 
-    y = df["label"].astype(int).to_numpy()
-    groups = df["record"].to_numpy()
+    X_temporal = np.load(X_PATH)
+    y = np.load(Y_PATH)
+    groups = np.load(
+        GROUPS_PATH,
+        allow_pickle=True,
+    )
+
+    print(f"Temporal X shape : {X_temporal.shape}")
+    print(f"Labels shape     : {y.shape}")
+    print(f"Groups shape     : {groups.shape}")
+
+    # --------------------------------------------------------
+    # Flatten the temporal representation for Random Forest.
+    #
+    # CNN / Transformer:
+    #     (samples, 5 minutes, 11 features)
+    #
+    # Random Forest:
+    #     (samples, 55 features)
+    #
+    # Same samples, labels and subject groups.
+    # --------------------------------------------------------
+
+    X = X_temporal.reshape(
+        X_temporal.shape[0],
+        -1,
+    )
+
+    print(f"RF input shape    : {X.shape}")
 
     cv = GroupKFold(
         n_splits=n_splits
@@ -117,7 +169,10 @@ def run_random_forest(
     fold_results = []
     all_predictions = []
 
-    for fold, (train_idx, test_idx) in enumerate(
+    for fold, (
+        train_idx,
+        test_idx,
+    ) in enumerate(
         cv.split(
             X,
             y,
@@ -125,6 +180,10 @@ def run_random_forest(
         ),
         start=1,
     ):
+
+        print(
+            f"\nFOLD {fold}/{n_splits}"
+        )
 
         X_train = X[train_idx]
         X_test = X[test_idx]
@@ -147,7 +206,7 @@ def run_random_forest(
                         max_depth=12,
                         min_samples_leaf=2,
                         class_weight="balanced",
-                        random_state=42,
+                        random_state=SEED,
                         n_jobs=-1,
                     ),
                 ),
@@ -175,15 +234,18 @@ def run_random_forest(
 
         metrics["fold"] = fold
 
-        fold_results.append(metrics)
+        fold_results.append(
+            metrics
+        )
 
         fold_predictions = pd.DataFrame(
             {
                 "fold": fold,
-                "record": groups[test_idx],
+                "sample_index": test_idx,
+                "group": groups[test_idx],
                 "y_true": y_test,
-                "y_prob": probabilities,
                 "y_pred": predictions,
+                "y_prob": probabilities,
             }
         )
 
@@ -192,73 +254,97 @@ def run_random_forest(
         )
 
         print(
-            f"Fold {fold}: "
             f"F1={metrics['f1']:.4f} | "
             f"Sensitivity={metrics['sensitivity']:.4f} | "
-            f"Specificity={metrics['specificity']:.4f}"
+            f"Specificity={metrics['specificity']:.4f} | "
+            f"ROC-AUC={metrics['roc_auc']:.4f}"
         )
 
-    results_df = pd.DataFrame(
+    # --------------------------------------------------------
+    # Aggregate results
+    # --------------------------------------------------------
+
+    metrics_names = [
+        "accuracy",
+        "balanced_accuracy",
+        "precision",
+        "sensitivity",
+        "specificity",
+        "f1",
+        "roc_auc",
+        "pr_auc",
+    ]
+
+    summary = {}
+
+    for metric in metrics_names:
+
+        values = [
+            result[metric]
+            for result in fold_results
+        ]
+
+        summary[metric] = {
+            "mean": float(
+                np.mean(values)
+            ),
+            "std": float(
+                np.std(values)
+            ),
+        }
+
+    # --------------------------------------------------------
+    # Save fold metrics
+    # --------------------------------------------------------
+
+    fold_df = pd.DataFrame(
         fold_results
     )
 
-    prediction_df = pd.concat(
-        all_predictions,
-        ignore_index=True,
-    )
-
-    summary = {
-        metric: {
-            "mean": float(
-                results_df[metric].mean()
-            ),
-            "std": float(
-                results_df[metric].std()
-            ),
-        }
-        for metric in [
-            "accuracy",
-            "balanced_accuracy",
-            "precision",
-            "sensitivity",
-            "specificity",
-            "f1",
-            "roc_auc",
-            "pr_auc",
-        ]
-    }
-
-    output_dir = Path(
-        "results"
-    )
-
-    (output_dir / "metrics").mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    (output_dir / "predictions").mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    results_df.to_csv(
-        output_dir
-        / "metrics"
+    fold_df.to_csv(
+        METRICS_DIR
         / "random_forest_folds.csv",
         index=False,
     )
 
-    prediction_df.to_csv(
-        output_dir
-        / "predictions"
+    # --------------------------------------------------------
+    # Save predictions
+    # --------------------------------------------------------
+
+    predictions_df = pd.concat(
+        all_predictions,
+        ignore_index=True,
+    )
+
+    predictions_df.to_csv(
+        PRED_DIR
         / "random_forest_predictions.csv",
         index=False,
     )
 
+    # --------------------------------------------------------
+    # Save summary
+    # --------------------------------------------------------
+
+    summary["model"] = (
+        "Random Forest"
+    )
+
+    summary["n_splits"] = n_splits
+    summary["n_samples"] = int(
+        len(y)
+    )
+
+    summary["n_subjects"] = int(
+        len(np.unique(groups))
+    )
+
+    summary["input_shape"] = list(
+        X.shape
+    )
+
     with open(
-        output_dir
-        / "metrics"
+        METRICS_DIR
         / "random_forest_summary.json",
         "w",
         encoding="utf-8",
@@ -270,19 +356,44 @@ def run_random_forest(
             indent=2,
         )
 
-    print("\nRANDOM FOREST")
-    print("=" * 50)
+    # --------------------------------------------------------
+    # Final console summary
+    # --------------------------------------------------------
 
-    for metric, values in summary.items():
+    print("\n")
+    print("=" * 70)
+    print("RANDOM FOREST FINAL RESULTS")
+    print("=" * 70)
+
+    for metric in metrics_names:
+
+        mean = summary[
+            metric
+        ]["mean"]
+
+        std = summary[
+            metric
+        ]["std"]
 
         print(
             f"{metric:20s}: "
-            f"{values['mean']:.4f} ± "
-            f"{values['std']:.4f}"
+            f"{mean:.4f} ± {std:.4f}"
         )
 
-    return results_df, prediction_df
+    print("\nSaved:")
+    print(
+        METRICS_DIR
+        / "random_forest_summary.json"
+    )
+
+    print(
+        PRED_DIR
+        / "random_forest_predictions.csv"
+    )
+
+    print("=" * 70)
 
 
 if __name__ == "__main__":
+
     run_random_forest()

@@ -216,7 +216,10 @@ def create_ml_ready_dataset(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
 
-    result = df.copy()
+    if "signal_quality" in result.columns:
+        result = result[
+            result["signal_quality"].eq("usable")
+        ].copy()
 
     # Supervised learning requires valid labels.
     result = result[
@@ -239,6 +242,8 @@ def create_ml_ready_dataset(
         "record",
         "epoch_idx",
         "peak_source",
+        "signal_quality",
+        "quality_reason",
     ]
 
     feature_columns = [
