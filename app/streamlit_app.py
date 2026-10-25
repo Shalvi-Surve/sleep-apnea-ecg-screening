@@ -3017,10 +3017,16 @@ comparison = performance_from_available_data()
 # Learning-record screening uses the V2 artifact, which contains
 # the 34 expected A/B/C learning records. Transformer V1 remains
 # available separately for its stored test-set results.
-transformer_predictions = predictions.get(
-    "Proposed Transformer V2",
-    pd.DataFrame(),
+transformer_v1_predictions = predictions.get(
+    "Transformer V1", pd.DataFrame()
 )
+
+learning_transformer_predictions = predictions.get(
+    "Proposed Transformer V2", pd.DataFrame()
+)
+
+# Preserve compatibility with existing pages that expect V1.
+transformer_predictions = transformer_v1_predictions
 
 feature_importance = prepare_feature_importance()
 
@@ -4911,7 +4917,7 @@ elif page == "Screening Results":
     if screening_source.startswith("Learning"):
 
         screening = build_record_screening(
-            transformer_predictions,
+            learning_transformer_predictions,
             threshold,
         )
 
@@ -5022,7 +5028,7 @@ elif page == "Screening Results":
                 )
 
                 fig = plot_record_probability(
-                    transformer_predictions,
+                    learning_transformer_predictions,
                     selected_record,
                     threshold,
                 )
@@ -5085,7 +5091,7 @@ elif page == "Screening Results":
 
                     profile = record_feature_profile(
                         selected_record,
-                        transformer_predictions,
+                        learning_transformer_predictions,
                         ml_ready,
                         feature_importance,
                     )
